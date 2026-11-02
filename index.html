@@ -59,6 +59,17 @@ button:active{transform:translateY(2px);box-shadow:0 2px 0 rgba(0,0,0,.15)}
 .frm input[type=text]{font-family:inherit;font-size:16px;padding:8px 12px;border-radius:12px;border:2px solid var(--line);background:var(--soft);color:var(--ink)}
 .add{background:var(--up)}.pre{background:#ff9f68}
 .graph svg{border-radius:18px}
+.top{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+@media(max-width:560px){.top{grid-template-columns:1fr}}
+.top input{width:100%;margin-top:6px;font-family:inherit;font-size:17px;padding:8px 12px;border-radius:12px;border:2px solid var(--line);background:var(--soft);color:var(--ink)}
+.modes{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px}
+#ttl{font-weight:700;font-size:18px}
+.cmpg{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.cmpc{background:var(--soft);border-radius:16px;padding:12px;font-size:14px}
+.sc{font-size:32px;font-weight:700}
+:root{--mix:100%}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--mix:38%}}
+:root[data-theme="dark"]{--mix:38%}
 .node .lbl{paint-order:stroke;stroke:var(--card);stroke-width:4px;stroke-linejoin:round}
 :root{--sky1:#cdeeff;--sky2:#fff4dd;--hill1:#cdeec3;--hill2:#b3e4a8;--soil:#ecd7c0;--soil2:#dcc1a4;--water:#bde7f6;--cloud:#ffffff;--trunk:#c9a07a;--leaf:#a8dd9a;--edge:#8f8174}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--sky1:#2b3a55;--sky2:#4a4a63;--hill1:#3d5a4a;--hill2:#35503f;--soil:#5a4a3f;--soil2:#6b5a4d;--water:#3d6b86;--cloud:#6a6f87;--trunk:#7a5c46;--leaf:#4a7a55;--edge:#cfc3b5}}
@@ -70,11 +81,16 @@ button:active{transform:translateY(2px);box-shadow:0 2px 0 rgba(0,0,0,.15)}
   <h1>🌿 먹이그물 탐험대</h1>
   <p class="lead">화살표는 “먹히는 생물 → 먹는 생물” 방향이에요. 생물을 눌러 보세요!</p>
 
+  <div class="top">
+    <div class="box"><b>📍 우리가 조사한 환경</b><br><input type="text" id="env" list="envs" placeholder="예: 연못" maxlength="12"><datalist id="envs"><option value="연못"><option value="녹지공원"><option value="논"><option value="하천"><option value="숲"><option value="초지"></datalist></div>
+    <div class="box"><b>🏷️ 환경 고르기</b><br><span id="envChips"></span></div>
+  </div>
+  <div class="modes"><button type="button" class="chip on" id="mWeb">🕸️ 먹이그물</button> <button type="button" class="chip" id="mChain">🔗 먹이사슬</button> <span id="ttl"></span></div>
   <div class="graph">
     <svg id="svg" viewBox="0 0 800 500" role="img" aria-label="먹이그물 그래프"></svg>
     <div class="legend">
       <span>🟧 선택한 먹이사슬</span><span style="color:var(--up)">▲ 늘어요</span>
-      <span style="color:var(--down)">▼ 줄어요</span><span>⚪ 사라졌어요</span><span>🟫 점선: 분해자</span><span>🚨 외래종</span>
+      <span style="color:var(--down)">▼ 줄어요</span><span>⚪ 사라졌어요</span><span>🟫 점선: 분해자</span><span>🚨 외래종</span><span id="stats"></span>
     </div>
   </div>
 
@@ -86,6 +102,7 @@ button:active{transform:translateY(2px);box-shadow:0 2px 0 rgba(0,0,0,.15)}
       <div style="margin-top:10px"><button class="reset" id="resetBtn">🔄 처음으로</button></div>
     </div>
   </div>
+<div class="box" id="cmp" style="margin-top:14px"></div>
 <div class="box" id="addBox" style="margin-top:14px"></div>
 </div>
 
@@ -105,12 +122,14 @@ let EDGES = [['grass','rabbit'],['grass','hopper'],['grass','mouse'],
   ['rabbit','hawk'],['mouse','hawk'],['snake','hawk']];
 SP.decomp = {n:'분해자',e:'🍄',x:710,y:420,c:'#ead9c8',role:'분해자',d:'죽은 생물, 낙엽, 똥을 분해해서 흙에 양분을 돌려줘요. 버섯, 곰팡이, 세균이 있어요.'};
 let ids = Object.keys(SP); const R = 38;
-const preyOf = id => EDGES.filter(e=>e[1]===id).map(e=>e[0]);
-const predOf = id => EDGES.filter(e=>e[0]===id).map(e=>e[1]);
+const preyOf = id => E().filter(e=>e[1]===id).map(e=>e[0]);
+const predOf = id => E().filter(e=>e[0]===id).map(e=>e[1]);
 const batchim = s => { const c = s.charCodeAt(s.length-1)-0xAC00; return c>=0 && c%28!==0; };
 const j = (n,a,b) => n + (batchim(n)?a:b);
 
 let extinct = new Set(), pop = {}, selected = null, lastKilled = null;
+let mode = 'web', chainTop = null, ovr = null, sceneKey = 'default';
+const E = () => ovr || (mode==='chain' ? chainEdges() : EDGES);
 
 function simulate(){
   ids.forEach(i => pop[i] = extinct.has(i) ? 0 : 100);
@@ -182,7 +201,7 @@ function scene(){
   const tree = (x,y,s)=>`<g transform="translate(${x} ${y}) scale(${s})"><rect x="-6" y="0" width="12" height="46" rx="4" style="fill:var(--trunk)"/><circle cx="0" cy="-8" r="34" style="fill:var(--leaf)"/><circle cx="-22" cy="12" r="24" style="fill:var(--leaf)"/><circle cx="22" cy="12" r="24" style="fill:var(--leaf)"/></g>`;
   const cloud = (x,y,s)=>`<g transform="translate(${x} ${y}) scale(${s})" style="fill:var(--cloud)"><ellipse cx="0" cy="0" rx="34" ry="14"/><circle cx="-12" cy="-10" r="16"/><circle cx="12" cy="-12" r="19"/></g>`;
   const flower = (x,y,c)=>`<g transform="translate(${x} ${y})"><line x1="0" y1="0" x2="0" y2="14" stroke="#7bc47f" stroke-width="2"/><circle r="5" fill="${c}"/><circle r="2" fill="#fff6c9"/></g>`;
-  return `<g pointer-events="none">
+  return `<g id="scn" pointer-events="none" style="${sceneStyle()}">
   <defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--sky1)"/><stop offset=".75" style="stop-color:var(--sky2)"/></linearGradient></defs>
   <rect width="800" height="500" fill="url(#sky)"/>
   <circle cx="735" cy="62" r="42" fill="#ffe27a" opacity=".3"/><circle cx="735" cy="62" r="30" fill="#ffe27a"/>
@@ -190,9 +209,9 @@ function scene(){
   <path d="M190 40q8-8 16 0M220 52q7-7 14 0" stroke="#8a8a9a" fill="none" stroke-width="2" opacity=".6"/>
   <path d="M0 330Q130 250 280 312T560 300T800 290V500H0Z" style="fill:var(--hill1)"/>
   <path d="M0 395Q200 350 400 385T800 370V500H0Z" style="fill:var(--hill2)"/>
-  ${tree(36,265,.9)}${tree(772,262,.8)}
-  <ellipse cx="130" cy="418" rx="78" ry="20" style="fill:var(--water)"/><ellipse cx="118" cy="414" rx="30" ry="6" fill="#fff" opacity=".45"/>
-  ${flower(210,430,'#ff9ec0')}${flower(470,435,'#ffd36e')}${flower(560,425,'#ffffff')}${flower(40,405,'#c7a6ff')}
+  ${deco(tree,flower)}
+  
+  
   <path d="M0 458Q200 446 400 458T800 452V500H0Z" style="fill:var(--soil)"/>
   <g style="fill:var(--soil2)"><circle cx="60" cy="480" r="5"/><circle cx="250" cy="487" r="4"/><circle cx="420" cy="478" r="6"/><circle cx="560" cy="489" r="4"/><circle cx="640" cy="476" r="5"/></g>
   </g>`;
@@ -214,7 +233,8 @@ function decompHL(){
     l.style.opacity = st0('decomp') ? .12 : (l.classList.contains('dg') && selected && !show ? .15 : '');
   });
 }
-function buildSvg(){
+function buildSvg(){ const _o=ovr; ovr=EDGES; buildSvg0(); ovr=_o; }
+function buildSvg0(){
   layout();
   let h = `<defs>
     <marker id="a1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" style="fill:var(--edge)"/></marker>
@@ -235,7 +255,7 @@ function buildSvg(){
     </g>`;
   });
   svg.innerHTML = h;
-  svg.querySelectorAll('.node').forEach(g=>g.addEventListener('click',()=>{selected=g.dataset.id;render();}));
+  svg.querySelectorAll('.node').forEach(g=>g.addEventListener('click',()=>{ selected=g.dataset.id; if(mode==='chain' && EDGES.some(e=>e[1]===selected)) chainTop=selected; simulate(); render(); }));
 }
 
 function render(){
@@ -244,7 +264,7 @@ function render(){
   if(selected){ conn.add(selected); conn.add('decomp'); preyOf(selected).forEach(x=>conn.add(x)); predOf(selected).forEach(x=>conn.add(x)); }
   ids.forEach(i=>{
     const g = document.getElementById('n_'+i), st = status(i);
-    g.classList.toggle('dim', !!selected && !conn.has(i));
+    g.classList.toggle('dim', (!!selected && !conn.has(i)) || !inChain(i));
     const c = g.querySelector('circle.body');
     c.setAttribute('stroke', i===selected ? '#ff8a3d' : (st.k==='same' ? '#fff' : st.col));
     c.style.fill = st.k==='gone' ? '#dcd8d3' : SP[i].c;
@@ -256,10 +276,11 @@ function render(){
     const on = selected && (a===selected || b===selected);
     e.classList.toggle('on', !!on);
     e.classList.toggle('dead', st0(a)||st0(b));
+    e.style.display = E().some(x=>x[0]===a&&x[1]===b) ? '' : 'none';
     e.setAttribute('marker-end', on ? 'url(#a2)' : 'url(#a1)');
     e.style.opacity = selected && !on ? .15 : '';
   });
-  decompHL(); renderCard(); renderPops();
+  decompHL(); renderCard(); renderPops(); renderExtras();
 }
 const st0 = i => status(i).k==='gone';
 
@@ -275,7 +296,7 @@ function renderCard(){
     html = `<div style="display:flex;gap:12px;align-items:center"><div class="big">${s.e}</div>
       <div><h2 style="margin:0">${s.n}</h2><span class="pill">${s.role}</span>${s.inv?'<span class="pill" style="background:#ffd0d0;color:#a33">🚨 외래종</span>':''}</div></div>
       <p class="row">${s.d}</p>
-      <div class="row">🍽️ <b>먹는 것</b><br>${eats}</div>
+      <div class="row">🍽️ <b>먹는 것</b><br>${eats}${!isD&&preyOf(selected).length>0?(preyOf(selected).length===1?'<br><small style="color:var(--down)">⚠️ 먹이가 하나뿐이라 이게 없어지면 위험해요!</small>':'<br><small style="color:var(--up)">🛟 먹이가 '+preyOf(selected).length+'가지라서 하나가 없어져도 버틸 수 있어요</small>'):''}</div>
       <div class="row">⚠️ <b>${isD?'하는 일':'나를 먹는 것'}</b><br>${eaten}</div>
       <button class="${dead?'revive':'kill'}" id="toggleBtn">${dead?'💚 되살리기':'💥 멸종시키기'}</button>${s.user?' <button class="reset" id="delBtn">🗑️ 지우기</button>':''}`;
   }
@@ -308,7 +329,7 @@ function renderPops(){
   document.getElementById('pops').innerHTML = ids.map(i=>{
     const st = status(i), w = Math.min(100, pop[i]/2);
     const col = st.k==='same' ? '#9bd8e8' : st.col;
-    return `<div class="pr ${i===selected?'sel':''}" data-id="${i}">
+    return `<div class="pr ${i===selected?'sel':''}" style="opacity:${inChain(i)?1:.35}" data-id="${i}">
       <span>${SP[i].e} ${SP[i].n}</span>
       <div class="bar"><i style="width:${w}%;background:${col}"></i></div>
       <span class="st" style="color:${st.k==='same'?'var(--sub)':st.col}">${pop[i]} ${st.ic}</span></div>`;
@@ -369,6 +390,94 @@ function removeSp(id){
   simulate(); buildSvg(); render(); renderAdd();
 }
 simulate(); buildSvg(); render(); renderAdd();
+
+function longest(t, seen=[]){
+  let best = [t];
+  EDGES.filter(e=>e[1]===t && !seen.includes(e[0])).forEach(e=>{ const c = longest(e[0],[...seen,t]).concat(t); if(c.length>best.length) best=c; });
+  return best;
+}
+function chainList(){
+  const cons = ids.filter(i=>i!=='decomp');
+  if(chainTop && SP[chainTop]) return longest(chainTop);
+  let b = []; cons.forEach(i=>{ const c=longest(i); if(c.length>b.length) b=c; }); return b;
+}
+function chainEdges(){ const c=chainList(), o=[]; for(let k=1;k<c.length;k++) o.push([c[k-1],c[k]]); return o; }
+function inChain(i){ return mode==='web' || i==='decomp' || chainList().includes(i); }
+function setMode(m){ mode=m; simulate(); render(); }
+document.getElementById('mWeb').onclick = ()=>setMode('web');
+document.getElementById('mChain').onclick = ()=>setMode('chain');
+
+function setTitle(){
+  const v = document.getElementById('env').value.replace(/[<>&]/g,'').trim();
+  const k = envKey(v);
+  if(k!==sceneKey){ sceneKey=k; const o=document.getElementById('scn'); if(o) o.outerHTML=scene(); }
+  document.getElementById('ttl').innerHTML = `${v?'📍 '+v+' ':''}${mode==='chain'?'먹이사슬':'먹이그물'} <small style="color:var(--sub);font-weight:400">${mode==='chain'?'한 줄로만 이어져요 (생물을 누르면 그 생물까지의 사슬을 보여줘요)':'여러 갈래로 얽혀 있어요'}</small>`;
+}
+document.getElementById('env').oninput = setTitle;
+const ENVS = ['🪷 연못','🌳 녹지공원','🌾 논','🏞️ 하천','🌲 숲','🌼 초지'];
+const chipsEl = document.getElementById('envChips');
+chipsEl.innerHTML = ENVS.map(x=>`<button type="button" class="chip" data-env="${x.split(' ')[1]}">${x}</button>`).join(' ');
+chipsEl.onclick = e=>{ const b=e.target.closest('button'); if(b){ document.getElementById('env').value=b.dataset.env; setTitle(); } };
+
+function envKey(v){
+  return v.includes('연못')?'pond' : v.includes('공원')?'park' : v.includes('논')?'paddy' : (v.includes('하천')||v.includes('강')||v.includes('개울'))?'river' : v.includes('숲')?'forest' : (v.includes('초지')||v.includes('풀밭'))?'grass' : 'default';
+}
+function sceneStyle(){
+  const P = {pond:['#d5f0d0','#bfe8b8'],park:['#cdeec3','#b3e4a8'],paddy:['#e6f1b5','#d3e79a'],river:['#cdeec3','#b3e4a8'],forest:['#a9d9a0','#8cc884'],grass:['#e3f1b0','#cfe58f']}[sceneKey];
+  if(!P) return '';
+  const m = (c,b)=>`color-mix(in srgb,${c} var(--mix),${b})`;
+  let s = `--hill1:${m(P[0],'#25352f')};--hill2:${m(P[1],'#25352f')}`;
+  if(sceneKey==='pond'||sceneKey==='river') s += `;--water:${m('#a9dff2','#25455a')}`;
+  return s;
+}
+function deco(tree,flower){
+  const tuft = (x,y)=>`<path d="M${x} ${y}l-5-14M${x} ${y}l0-18M${x} ${y}l5-14" stroke="#6fbf73" stroke-width="2.5" stroke-linecap="round" fill="none"/>`;
+  const pine = (x,y,s)=>`<g transform="translate(${x} ${y}) scale(${s})"><rect x="-4" y="30" width="8" height="18" style="fill:var(--trunk)"/><path d="M0-40L24 0H-24ZM0-20L30 24H-30Z" style="fill:var(--leaf)"/></g>`;
+  const reed = (x,y)=>`<line x1="${x}" y1="${y}" x2="${x}" y2="${y-34}" stroke="#7fae6a" stroke-width="3"/><rect x="${x-3}" y="${y-42}" width="6" height="14" rx="3" fill="#a9724a"/>`;
+  const rock = (x,y,w)=>`<ellipse cx="${x}" cy="${y}" rx="${w}" ry="${w*.6}" fill="#b9b5ae"/>`;
+  const mush = (x,y)=>`<g transform="translate(${x} ${y})"><rect x="-3" y="-2" width="6" height="12" fill="#fff4e0"/><path d="M-12-2a12 10 0 0124 0Z" fill="#ff7b7b"/></g>`;
+  const rows = (y,o)=>Array.from({length:16},(_,k)=>tuft(o+k*50,y)).join('');
+  const fl = [[210,430,'#ff9ec0'],[470,435,'#ffd36e'],[560,425,'#ffffff'],[40,405,'#c7a6ff']].map(a=>flower(...a)).join('');
+  const D = {
+    default:()=>tree(36,265,.9)+tree(772,262,.8)+`<ellipse cx="130" cy="418" rx="78" ry="20" style="fill:var(--water)"/><ellipse cx="118" cy="414" rx="30" ry="6" fill="#fff" opacity=".45"/>`+fl,
+    pond:()=>`<ellipse cx="400" cy="402" rx="350" ry="54" style="fill:var(--water)"/><ellipse cx="260" cy="392" rx="100" ry="8" fill="#fff" opacity=".35"/><ellipse cx="560" cy="414" rx="80" ry="7" fill="#fff" opacity=".3"/>`+[[90,415],[690,400],[470,432]].map(([x,y])=>`<ellipse cx="${x}" cy="${y}" rx="24" ry="9" fill="#7ccf8a"/><circle cx="${x+5}" cy="${y-6}" r="6" fill="#ff9ec0"/>`).join('')+[28,52,772,748].map(x=>reed(x,402)).join(''),
+    park:()=>tree(36,268,.9)+`<path d="M330 500Q380 420 340 380T430 320" stroke="#f1dfc2" stroke-width="46" fill="none" stroke-linecap="round"/><rect x="600" y="372" width="64" height="8" rx="3" fill="#c98f5b"/><rect x="604" y="356" width="56" height="8" rx="3" fill="#c98f5b"/><rect x="608" y="380" width="6" height="16" fill="#8a6a4a"/><rect x="650" y="380" width="6" height="16" fill="#8a6a4a"/><rect x="742" y="296" width="6" height="76" fill="#6d7a86"/><circle cx="745" cy="290" r="12" fill="#ffe9a0"/><circle cx="170" cy="432" r="16" style="fill:var(--leaf)"/><circle cx="200" cy="438" r="12" style="fill:var(--leaf)"/>`+fl,
+    paddy:()=>`<path d="M0 352H800V388H0Z" fill="#bfe6c4"/><path d="M0 394H800V440H0Z" fill="#c9eab0"/>`+rows(380,25)+rows(428,50)+`<line x1="745" y1="300" x2="745" y2="372" stroke="#8a6a4a" stroke-width="5"/><line x1="720" y1="322" x2="770" y2="322" stroke="#8a6a4a" stroke-width="5"/><circle cx="745" cy="298" r="12" fill="#ffe3b3"/><path d="M728 292H762L745 272Z" fill="#e0b25a"/>`,
+    river:()=>tree(36,268,.8)+tree(772,255,.8)+`<path d="M-20 350Q200 330 330 395T820 415" stroke-width="90" fill="none" style="stroke:var(--water)"/><path d="M60 360q15-8 30 0t30 0M470 410q15-8 30 0t30 0M640 418q15-8 30 0t30 0" stroke="#fff" fill="none" stroke-width="3" opacity=".6"/>`+rock(110,308,14)+rock(690,352,18)+rock(260,440,12)+reed(20,446)+reed(770,330),
+    forest:()=>[[40,300,1.1],[110,310,.9],[175,300,1.05],[625,300,1.05],[700,310,.9],[765,300,1.1]].map(a=>pine(...a)).join('')+mush(200,440)+mush(600,446)+tuft(300,440)+tuft(500,436),
+    grass:()=>tree(710,285,.85)+[60,150,260,380,520,620,760].map((x,k)=>tuft(x,425+(k%3)*12)).join('')+fl+flower(330,442,'#ff8f8f')+flower(650,436,'#ffd36e')
+  };
+  return (D[sceneKey]||D.default)();
+}
+function snap(edges){
+  ovr = edges; simulate();
+  const set = ids.filter(i=>i!=='decomp' && (edges===EDGES || chainList().includes(i)));
+  const alive = set.filter(i=>status(i).k!=='gone').length;
+  const bal = Math.round(100*set.reduce((s,i)=>s+Math.max(0,1-Math.abs(pop[i]-100)/100),0)/(set.length||1));
+  return {alive, n:set.length, bal};
+}
+function renderCmp(){
+  const a = snap(chainEdges()), b = snap(EDGES); ovr = null; simulate();
+  let m = '위 그림에서 생물을 골라 <b>멸종시키기</b>를 눌러 보세요. 같은 일이 먹이사슬과 먹이그물에서 어떻게 다른지 점수로 비교해요!';
+  if(extinct.size){
+    if(a.bal===100 && b.bal<100) m = '멸종시킨 생물이 먹이사슬 안에는 없어요. 사슬에 들어 있는 생물로도 해 보세요.';
+    else if(b.bal>a.bal) m = '💡 먹이그물에서는 먹이가 여러 가지라서 한 종이 사라져도 다른 먹이를 먹고 버틸 수 있어요. 그래서 생태계 균형이 더 잘 유지돼요!';
+    else m = '점수가 비슷해요. 다른 생물을 멸종시켜 다시 비교해 보세요.';
+  }
+  document.getElementById('cmp').innerHTML = `<h2>⚖️ 먹이사슬 vs 먹이그물, 어느 쪽이 더 튼튼할까요?</h2>
+  <div class="cmpg"><div class="cmpc"><b>🔗 먹이사슬</b><br>한 줄로만 이어져요<div class="sc">${a.bal}점</div>살아남은 생물 ${a.alive}/${a.n}종</div>
+  <div class="cmpc"><b>🕸️ 먹이그물</b><br>여러 갈래로 이어져요<div class="sc">${b.bal}점</div>살아남은 생물 ${b.alive}/${b.n}종</div></div>
+  <div class="msg">${m}</div>
+  <p class="row" style="color:var(--sub);margin-bottom:0">균형 점수는 생물 수가 처음(100)과 비슷할수록 높아요.</p>`;
+}
+function renderExtras(){
+  const cons = ids.filter(i=>i!=='decomp' && inChain(i) && preyOf(i).length);
+  const avg = cons.length ? cons.reduce((s,i)=>s+preyOf(i).length,0)/cons.length : 0;
+  document.getElementById('stats').textContent = `🔗 연결선 ${E().length}개 · 🍽️ 먹이 선택지 평균 ${avg.toFixed(1)}가지`;
+  document.getElementById('mWeb').classList.toggle('on', mode==='web');
+  document.getElementById('mChain').classList.toggle('on', mode==='chain');
+  setTitle(); renderCmp();
+}
 </script>
 </body>
 </html>
